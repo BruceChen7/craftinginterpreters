@@ -378,6 +378,7 @@ static ObjFunction* endCompiler() {
 //< Compiling Expressions end-compiler
 //> Local Variables begin-scope
 static void beginScope() {
+  // 当前compiler的范围+1
   current->scopeDepth++;
 }
 //< Local Variables begin-scope
@@ -396,6 +397,8 @@ static void endScope() {
     if (current->locals[current->localCount - 1].isCaptured) {
       emitByte(OP_CLOSE_UPVALUE);
     } else {
+      // 处理block结束后的栈
+      // pop locals
       emitByte(OP_POP);
     }
 //< Closures end-scope
@@ -491,6 +494,7 @@ static int resolveUpvalue(Compiler* compiler, Token* name) {
 }
 //< Closures resolve-upvalue
 //> Local Variables add-local
+// 将名字添加到local表中
 static void addLocal(Token name) {
 //> too-many-locals
   if (current->localCount == UINT8_COUNT) {
@@ -515,16 +519,19 @@ static void addLocal(Token name) {
 //> Local Variables declare-variable
 static void declareVariable() {
   // Global variables are implicitly declared.
+  // 如果是局部变量，那么直接返回
   if (current->scopeDepth == 0) return;
 
+  // 用来处理全局变量逻辑
   Token* name = &parser.previous;
 //> existing-in-scope
+  // 处理在一个block 中声明相同的block
   for (int i = current->localCount - 1; i >= 0; i--) {
     Local* local = &current->locals[i];
     if (local->depth != -1 && local->depth < current->scopeDepth) {
       break; // [negative]
     }
-    
+
     if (identifiersEqual(name, &local->name)) {
       error("Variable with this name already declared in this scope.");
     }
@@ -540,6 +547,8 @@ static uint8_t parseVariable(const char* errorMessage) {
 //> Local Variables parse-local
 
   declareVariable();
+  // 如果是局部变量并没有做任何事情，因为操作数和操作码已经放到
+  // 栈中
   if (current->scopeDepth > 0) return 0;
 
 //< Local Variables parse-local
@@ -811,7 +820,7 @@ static void super_(bool canAssign) {
   consume(TOKEN_IDENTIFIER, "Expect superclass method name.");
   uint8_t name = identifierConstant(&parser.previous);
 //> super-get
-  
+
   namedVariable(syntheticToken("this"), false);
 /* Superclasses super-get < Superclasses super-invoke
   namedVariable(syntheticToken("super"), false);
@@ -1047,6 +1056,7 @@ static void expression() {
 //< Compiling Expressions expression
 //> Local Variables block
 static void block() {
+  // 没有到达}或者是文件结束，那么一直解析声明
   while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
     declaration();
   }
@@ -1069,7 +1079,7 @@ static void function(FunctionType type) {
       if (current->function->arity > 255) {
         errorAtCurrent("Cannot have more than 255 parameters.");
       }
-      
+
       uint8_t paramConstant = parseVariable("Expect parameter name.");
       defineVariable(paramConstant);
     } while (match(TOKEN_COMMA));
@@ -1116,7 +1126,7 @@ static void method() {
       memcmp(parser.previous.start, "init", 4) == 0) {
     type = TYPE_INITIALIZER;
   }
-  
+
 //< initializer-name
 //> method-body
   function(type);
@@ -1161,7 +1171,7 @@ static void classDeclaration() {
     beginScope();
     addLocal(syntheticToken("super"));
     defineVariable(0);
-    
+
 //< superclass-variable
     namedVariable(className, false);
     emitByte(OP_INHERIT);
@@ -1169,7 +1179,7 @@ static void classDeclaration() {
     classCompiler.hasSuperclass = true;
 //< set-has-superclass
   }
-  
+
 //< Superclasses compile-superclass
 //> Methods and Initializers load-class
   namedVariable(className, false);
@@ -1209,10 +1219,12 @@ static void varDeclaration() {
   uint8_t global = parseVariable("Expect variable name.");
 
   if (match(TOKEN_EQUAL)) {
+    // 直接计算表达式
     expression();
   } else {
     emitByte(OP_NIL);
   }
+  // 最后应该以结尾
   consume(TOKEN_SEMICOLON, "Expect ';' after variable declaration.");
 
   defineVariable(global);
@@ -1439,6 +1451,7 @@ static void declaration() {
 //< Global Variables declaration
 //> Global Variables statement
 static void statement() {
+  // 解析print statement
   if (match(TOKEN_PRINT)) {
     printStatement();
 //> Jumping Back and Forth parse-for
